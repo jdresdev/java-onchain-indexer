@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.jdres</groupId>
+  <artifactId>java-onchain-indexer</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+
+  <name>java-onchain-indexer</name>
+  <!-- FIXME change it to the project's website -->
+  <url>http://www.example.com</url>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+
+    <jooq.version>3.21.6</jooq.version>
+    <testcontainers.version>2.0.5</testcontainers.version>
+    <tc-jooq-codegen.version>0.0.4</tc-jooq-codegen.version>
+
+    <flyway.version>12.10.0</flyway.version>
+    <postgresql.version>42.7.9</postgresql.version>
+    <hikaricp.version>7.0.2</hikaricp.version>
+    <junit.version>5.14.0</junit.version>
+
+    <postgres.image>postgres:17-alpine</postgres.image>
+    <jooq.codegen.skip>false</jooq.codegen.skip>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Optionally: parameterized tests support -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-params</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.jooq</groupId>
+      <artifactId>jooq</artifactId>
+      <version>${jooq.version}</version>
+      <scope>compile</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>${postgresql.version}</version>
+    </dependency>
+
+    <!-- Flyway EN RUNTIME: migra la BD real al arrancar la app.
+     Es un uso distinto del que hace el plugin de codegen mas abajo. -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+      <version>${flyway.version}</version>
+    </dependency>
+    <!-- Desde Flyway 10 el soporte de cada motor va en artefacto aparte.
+         Sin esto: "Unsupported Database: PostgreSQL" en tiempo de ejecucion. -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+      <version>${flyway.version}</version>
+    </dependency>
+
+    <!-- For improved logging, we'll be using log4j via slf4j to see what's going on during migration and code generation -->
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-slf4j-impl</artifactId>
+      <version>2.26.1</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>1.21.4</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>1.21.4</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
+      <plugins>
+        <!-- clean lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#clean_Lifecycle -->
+        <plugin>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>3.4.0</version>
+        </plugin>
+        <!-- default lifecycle, jar packaging: see https://maven.apache.org/ref/current/maven-core/default-bindings.html#Plugin_bindings_for_jar_packaging -->
+        <plugin>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>3.3.1</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.13.0</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.3.0</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.4.2</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>3.1.2</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>3.1.2</version>
+        </plugin>
+        <!-- site lifecycle, see https://maven.apache.org/ref/current/maven-core/lifecycles.html#site_Lifecycle -->
+        <plugin>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>3.12.1</version>
+        </plugin>
+        <plugin>
+          <artifactId>maven-project-info-reports-plugin</artifactId>
+          <version>3.6.1</version>
+        </plugin>
+
+        <!-- ================================================================
+                CODEGEN: levanta Postgres efimero -> aplica Flyway -> genera jOOQ
+                Se engancha a generate-sources, asi que corre solo antes de compilar.
+                El plugin registra target/generated-sources/jooq como source root.
+                ================================================================ -->
+        <plugin>
+          <groupId>org.testcontainers</groupId>
+          <artifactId>testcontainers-jooq-codegen-maven-plugin</artifactId>
+          <version>${tc-jooq-codegen.version}</version>
+
+          <dependencies>
+            <dependency>
+              <groupId>org.testcontainers</groupId>
+              <artifactId>postgresql</artifactId>
+              <version>1.21.4</version>
+            </dependency>
+            <dependency>
+              <groupId>org.postgresql</groupId>
+              <artifactId>postgresql</artifactId>
+              <version>${postgresql.version}</version>
+            </dependency>
+            <dependency>
+              <groupId>org.flywaydb</groupId>
+              <artifactId>flyway-database-postgresql</artifactId>
+              <version>${flyway.version}</version>
+            </dependency>
+          </dependencies>
+
+          <executions>
+            <execution>
+              <id>generate-jooq-sources</id>
+              <phase>generate-sources</phase>
+              <goals>
+                <goal>generate</goal>
+              </goals>
+              <configuration>
+                <skip>${jooq.codegen.skip}</skip>
+
+                <database>
+                  <type>POSTGRES</type>
+                  <containerImage>${postgres.image}</containerImage>
+                </database>
+
+                <flyway>
+                  <locations>
+                    filesystem:src/main/resources/db/migration
+                  </locations>
+                </flyway>
+
+                <jooq>
+                  <generator>
+                    <database>
+                      <inputSchema>public</inputSchema>
+                      <includes>.*</includes>
+                      <!-- La tabla de control de Flyway no debe
+                           acabar en el DSL generado -->
+                      <excludes>flyway_schema_history</excludes>
+
+                      <!-- Las particiones de logs son tablas fisicas.
+                           Sin esto tendrias una clase generada por
+                           particion. Ajustar al patron de nombres
+                           que uses (logs_p000000, logs_p000001, ...) -->
+                      <!--
+                      <excludes>
+                          flyway_schema_history
+                          | logs_p\d+
+                      </excludes>
+                      -->
+
+                      <forcedTypes>
+                        <!-- numeric sin precision -> BigDecimal por
+                             defecto. Los uint256 de EVM se guardan
+                             mejor como numeric(78,0) y se mapean a
+                             BigInteger. Descomentar cuando toque. -->
+                        <!--
+                        <forcedType>
+                            <userType>java.math.BigInteger</userType>
+                            <converter>...</converter>
+                            <includeExpression>.*\.(value|amount)</includeExpression>
+                        </forcedType>
+                        -->
+                      </forcedTypes>
+                    </database>
+
+                    <generate>
+                      <javaTimeTypes>true</javaTimeTypes>
+                      <pojos>false</pojos>
+                      <daos>false</daos>
+                      <fluentSetters>true</fluentSetters>
+                    </generate>
+
+                    <target>
+                      <packageName>io.github.jdres.db.generated</packageName>
+                      <directory>target/generated-sources/jooq</directory>
+                      <clean>true</clean>
+                    </target>
+                  </generator>
+                </jooq>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>
